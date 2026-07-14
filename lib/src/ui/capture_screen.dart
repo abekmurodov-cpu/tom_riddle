@@ -24,7 +24,8 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   bool _saving = false;
   bool _aiBusy = false;
   Uint8List? _imageBytes;
-  // Pre-generated multiple-choice quiz, cached when the answer is AI-generated.
+  // Pre-generated quiz, cached when the answer is AI-generated.
+  String? _quizQuestion;
   String? _mcAnswer;
   List<String> _mcDistractors = const [];
 
@@ -59,8 +60,11 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         final quiz = await llm.generateQuiz(probe.copyWith(back: answer));
         _mcAnswer = quiz.answer;
         _mcDistractors = quiz.distractors;
+        // For bare facts, keep the generated question so practice asks it
+        // instead of echoing the fact. Other note types keep their own prompt.
+        _quizQuestion = _type == KnowledgeType.fact ? quiz.question : null;
       } catch (_) {
-        // Non-fatal: MC options will be generated lazily during practice.
+        // Non-fatal: the quiz will be generated lazily during practice.
       }
     } catch (e) {
       _showError('Could not generate: $e');
@@ -103,6 +107,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
           type: _type,
           category: _categoryController.text,
           imageBytes: _imageBytes,
+          quizQuestion: _quizQuestion,
           mcAnswer: _mcAnswer,
           mcDistractors: _mcDistractors,
         );

@@ -37,6 +37,7 @@ class KnowledgeListNotifier extends AsyncNotifier<List<KnowledgeItem>> {
     required KnowledgeType type,
     String? category,
     Uint8List? imageBytes,
+    String? quizQuestion,
     String? mcAnswer,
     List<String> mcDistractors = const [],
   }) async {
@@ -54,6 +55,7 @@ class KnowledgeListNotifier extends AsyncNotifier<List<KnowledgeItem>> {
       createdAt: now,
       dueDate: now, // due immediately so it appears in the first review
       hasImage: imageBytes != null,
+      quizQuestion: quizQuestion,
       mcAnswer: mcAnswer,
       mcDistractors: mcDistractors,
     );

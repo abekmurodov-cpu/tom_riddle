@@ -41,6 +41,7 @@ class KnowledgeItem {
     this.lastCorrect,
     this.lapses = 0,
     this.hasImage = false,
+    this.quizQuestion,
     this.mcAnswer,
     this.mcDistractors = const [],
   }) : updatedAt = updatedAt ?? createdAt;
@@ -74,7 +75,13 @@ class KnowledgeItem {
   /// Whether an image is attached (bytes live in the [ImageStore] keyed by id).
   final bool hasImage;
 
-  // --- Pre-generated multiple-choice quiz (concise, cached for practice) ---
+  // --- Pre-generated quiz (concise, cached for practice) ---
+  /// A question generated from the note so practice asks something answerable
+  /// instead of echoing a bare fact. E.g. a fact "Water boils at 100°C" becomes
+  /// "At what temperature does water boil?". Null for notes whose [front] is
+  /// already a usable prompt (then practice uses [front]).
+  final String? quizQuestion;
+
   /// Short correct answer used as the right option in multiple-choice practice
   /// (a 1–2 sentence summary, not the full [back] detail).
   final String? mcAnswer;
@@ -83,6 +90,13 @@ class KnowledgeItem {
   final List<String> mcDistractors;
 
   bool get hasAnswer => back != null && back!.trim().isNotEmpty;
+
+  /// What practice shows as the prompt: the generated [quizQuestion] if present,
+  /// otherwise the raw [front].
+  String get practicePrompt =>
+      (quizQuestion != null && quizQuestion!.trim().isNotEmpty)
+          ? quizQuestion!
+          : front;
 
   /// True once a full multiple-choice set (correct + ≥1 distractor) is cached.
   bool get hasMcOptions =>
@@ -108,6 +122,7 @@ class KnowledgeItem {
     bool? lastCorrect,
     int? lapses,
     bool? hasImage,
+    String? quizQuestion,
     String? mcAnswer,
     List<String>? mcDistractors,
   }) {
@@ -127,6 +142,7 @@ class KnowledgeItem {
       lastCorrect: lastCorrect ?? this.lastCorrect,
       lapses: lapses ?? this.lapses,
       hasImage: hasImage ?? this.hasImage,
+      quizQuestion: quizQuestion ?? this.quizQuestion,
       mcAnswer: mcAnswer ?? this.mcAnswer,
       mcDistractors: mcDistractors ?? this.mcDistractors,
     );
@@ -148,6 +164,7 @@ class KnowledgeItem {
         'lastCorrect': lastCorrect,
         'lapses': lapses,
         'hasImage': hasImage,
+        'quizQuestion': quizQuestion,
         'mcAnswer': mcAnswer,
         'mcDistractors': mcDistractors,
       };
@@ -175,6 +192,7 @@ class KnowledgeItem {
         lastCorrect: map['lastCorrect'] as bool?,
         lapses: (map['lapses'] as num?)?.toInt() ?? 0,
         hasImage: map['hasImage'] as bool? ?? false,
+        quizQuestion: map['quizQuestion'] as String?,
         mcAnswer: map['mcAnswer'] as String?,
         mcDistractors:
             (map['mcDistractors'] as List?)?.map((e) => e.toString()).toList() ??

@@ -72,14 +72,19 @@ class GeminiProvider implements LlmProvider {
       {int distractorCount = 3}) async {
     final known = item.hasAnswer ? '\nKnown detail: ${item.back}' : '';
     final raw = await _generate(
-      'Create a multiple-choice quiz item for this ${item.type.label.toLowerCase()}.\n'
-      'Return JSON only: {"answer": "...", "distractors": ["...", "..."]}.\n'
+      'Turn this ${item.type.label.toLowerCase()} note into a quiz item.\n'
+      'Return JSON only: {"question": "...", "answer": "...", "distractors": ["...", "..."]}.\n'
       'Rules:\n'
-      '- "answer" is the CORRECT answer, summarized in ONE short sentence (max ~15 words). '
-      'Do NOT copy long explanations.\n'
-      '- "distractors" is exactly $distractorCount plausible but clearly WRONG short answers, '
-      'each one short sentence, distinct from the answer.\n\n'
-      'Prompt: ${item.front}$known',
+      '- "question": a clear question that tests the note. If the note is a bare '
+      'fact/statement, REWRITE it as a question. '
+      'Example: note "Water boils at 100°C" -> question "At what temperature does water boil?". '
+      'If the note is already phrased as a question, keep it as-is.\n'
+      '- "answer": the CORRECT answer to "question", ONE short phrase/sentence '
+      '(max ~15 words). Do NOT copy long explanations. '
+      'Example answer: "100°C".\n'
+      '- "distractors": exactly $distractorCount plausible but clearly WRONG short '
+      'answers, distinct from the answer.\n\n'
+      'Note: ${item.front}$known',
     );
     try {
       final cleaned = raw
@@ -87,13 +92,14 @@ class GeminiProvider implements LlmProvider {
           .replaceAll(RegExp(r'```$'), '')
           .trim();
       final map = jsonDecode(cleaned) as Map<String, dynamic>;
+      final question = (map['question'] as String).trim();
       final answer = (map['answer'] as String).trim();
       final distractors = (map['distractors'] as List)
           .map((e) => e.toString().trim())
           .where((e) => e.isNotEmpty && e != answer)
           .take(distractorCount)
           .toList();
-      return McQuiz(answer: answer, distractors: distractors);
+      return McQuiz(question: question, answer: answer, distractors: distractors);
     } catch (_) {
       throw Exception('Gemini returned an unparseable quiz');
     }
@@ -105,8 +111,8 @@ class GeminiProvider implements LlmProvider {
       'Grade a student\'s answer to a flashcard. Decide if it is essentially '
       'correct (meaning matches, ignore wording/typos). '
       'Return JSON: {"correct": true|false, "feedback": "one short sentence"}.\n\n'
-      'Question: ${item.front}\n'
-      'Expected answer: ${item.back}\n'
+      'Question: ${item.practicePrompt}\n'
+      'Expected answer: ${item.mcAnswer ?? item.back}\n'
       'Student answer: $answer',
     );
     try {

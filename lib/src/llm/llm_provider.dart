@@ -12,8 +12,14 @@ class LlmGrade {
 /// short plausible-but-wrong distractors. Kept deliberately terse (1–2
 /// sentences each) so options read cleanly rather than dumping the full detail.
 class McQuiz {
-  const McQuiz({required this.answer, required this.distractors});
+  const McQuiz({
+    required this.question,
+    required this.answer,
+    required this.distractors,
+  });
 
+  /// A clear question testing the note (reworded from a bare fact if needed).
+  final String question;
   final String answer;
   final List<String> distractors;
 }
