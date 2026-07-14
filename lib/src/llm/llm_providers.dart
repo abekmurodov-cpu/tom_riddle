@@ -31,12 +31,12 @@ final geminiKeyProvider =
 /// Gemini models the user can pick from in Settings.
 const kGeminiModels = <String>[
   'gemini-2.5-flash',
-  'gemini-2.5-pro',
+  'gemini-3.5-flash',
   'gemini-2.5-flash-lite',
-  'gemini-2.0-flash',
+  'gemini-3.1-flash-lite',
 ];
 
-const kDefaultGeminiModel = 'gemini-2.5-flash';
+const kDefaultGeminiModel = 'gemini-3.1-flash-lite';
 
 /// The selected Gemini model, persisted in settings.
 class GeminiModelNotifier extends Notifier<String> {
