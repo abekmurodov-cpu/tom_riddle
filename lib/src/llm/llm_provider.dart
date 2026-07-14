@@ -8,6 +8,16 @@ class LlmGrade {
   final String? feedback;
 }
 
+/// A cached multiple-choice quiz for a note: one concise correct answer plus
+/// short plausible-but-wrong distractors. Kept deliberately terse (1–2
+/// sentences each) so options read cleanly rather than dumping the full detail.
+class McQuiz {
+  const McQuiz({required this.answer, required this.distractors});
+
+  final String answer;
+  final List<String> distractors;
+}
+
 /// Abstraction over a large-language-model backend. Implementations are
 /// attached/detached at runtime by the user (starting with Gemini). Every
 /// method may throw on network/credential errors — callers treat the LLM as a
@@ -21,9 +31,10 @@ abstract class LlmProvider {
   /// for its [KnowledgeItem.front].
   Future<String> expandNote(KnowledgeItem item);
 
-  /// Returns [count] plausible-but-wrong short answers to use as multiple-choice
-  /// distractors for [item].
-  Future<List<String>> generatePractice(KnowledgeItem item, {int count = 3});
+  /// Builds a full multiple-choice quiz for [item]: a concise correct answer
+  /// plus [distractorCount] short wrong options. Works even when the note has no
+  /// recorded answer yet (it reasons from the prompt).
+  Future<McQuiz> generateQuiz(KnowledgeItem item, {int distractorCount = 3});
 
   /// Judges whether [answer] is a correct response to [item].
   Future<LlmGrade> gradeAnswer(KnowledgeItem item, String answer);

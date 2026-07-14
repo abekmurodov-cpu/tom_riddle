@@ -41,6 +41,8 @@ class KnowledgeItem {
     this.lastCorrect,
     this.lapses = 0,
     this.hasImage = false,
+    this.mcAnswer,
+    this.mcDistractors = const [],
   }) : updatedAt = updatedAt ?? createdAt;
 
   final String id;
@@ -72,7 +74,23 @@ class KnowledgeItem {
   /// Whether an image is attached (bytes live in the [ImageStore] keyed by id).
   final bool hasImage;
 
+  // --- Pre-generated multiple-choice quiz (concise, cached for practice) ---
+  /// Short correct answer used as the right option in multiple-choice practice
+  /// (a 1–2 sentence summary, not the full [back] detail).
+  final String? mcAnswer;
+
+  /// Three short plausible-but-wrong options paired with [mcAnswer].
+  final List<String> mcDistractors;
+
   bool get hasAnswer => back != null && back!.trim().isNotEmpty;
+
+  /// True once a full multiple-choice set (correct + ≥1 distractor) is cached.
+  bool get hasMcOptions =>
+      mcAnswer != null && mcAnswer!.trim().isNotEmpty && mcDistractors.isNotEmpty;
+
+  /// Weak point: recently missed, or lapsed repeatedly. Drives the "Weak points"
+  /// practice scope and the red tree leaves.
+  bool get isWeak => lastCorrect == false || lapses >= 2;
 
   bool isDue(DateTime now) => !dueDate.isAfter(now);
 
@@ -90,6 +108,8 @@ class KnowledgeItem {
     bool? lastCorrect,
     int? lapses,
     bool? hasImage,
+    String? mcAnswer,
+    List<String>? mcDistractors,
   }) {
     return KnowledgeItem(
       id: id,
@@ -107,6 +127,8 @@ class KnowledgeItem {
       lastCorrect: lastCorrect ?? this.lastCorrect,
       lapses: lapses ?? this.lapses,
       hasImage: hasImage ?? this.hasImage,
+      mcAnswer: mcAnswer ?? this.mcAnswer,
+      mcDistractors: mcDistractors ?? this.mcDistractors,
     );
   }
 
@@ -126,6 +148,8 @@ class KnowledgeItem {
         'lastCorrect': lastCorrect,
         'lapses': lapses,
         'hasImage': hasImage,
+        'mcAnswer': mcAnswer,
+        'mcDistractors': mcDistractors,
       };
 
   factory KnowledgeItem.fromMap(Map<String, dynamic> map) => KnowledgeItem(
@@ -151,6 +175,10 @@ class KnowledgeItem {
         lastCorrect: map['lastCorrect'] as bool?,
         lapses: (map['lapses'] as num?)?.toInt() ?? 0,
         hasImage: map['hasImage'] as bool? ?? false,
+        mcAnswer: map['mcAnswer'] as String?,
+        mcDistractors:
+            (map['mcDistractors'] as List?)?.map((e) => e.toString()).toList() ??
+                const [],
       );
 
   String toJson() => jsonEncode(toMap());

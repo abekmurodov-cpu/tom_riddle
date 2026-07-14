@@ -37,6 +37,8 @@ class KnowledgeListNotifier extends AsyncNotifier<List<KnowledgeItem>> {
     required KnowledgeType type,
     String? category,
     Uint8List? imageBytes,
+    String? mcAnswer,
+    List<String> mcDistractors = const [],
   }) async {
     final now = DateTime.now();
     final id = _uuid.v4();
@@ -52,8 +54,17 @@ class KnowledgeListNotifier extends AsyncNotifier<List<KnowledgeItem>> {
       createdAt: now,
       dueDate: now, // due immediately so it appears in the first review
       hasImage: imageBytes != null,
+      mcAnswer: mcAnswer,
+      mcDistractors: mcDistractors,
     );
     await _repo.save(item);
+    await _refresh();
+  }
+
+  /// Persists an already-built item (bumping [updatedAt] for sync). Used by the
+  /// practice flow to cache a generated answer / multiple-choice quiz.
+  Future<void> persist(KnowledgeItem item) async {
+    await _repo.save(item.copyWith(updatedAt: DateTime.now()));
     await _refresh();
   }
 

@@ -68,31 +68,34 @@ class GeminiProvider implements LlmProvider {
   }
 
   @override
-  Future<List<String>> generatePractice(KnowledgeItem item,
-      {int count = 3}) async {
+  Future<McQuiz> generateQuiz(KnowledgeItem item,
+      {int distractorCount = 3}) async {
+    final known = item.hasAnswer ? '\nKnown detail: ${item.back}' : '';
     final raw = await _generate(
-      'For a multiple-choice quiz, write exactly $count plausible but INCORRECT '
-      'short answers (distractors) for this question. They must be clearly wrong '
-      'but believable, and distinct from the correct answer. '
-      'Return a JSON array of strings only, no other text.\n\n'
-      'Question: ${item.front}\n'
-      'Correct answer: ${item.back}',
+      'Create a multiple-choice quiz item for this ${item.type.label.toLowerCase()}.\n'
+      'Return JSON only: {"answer": "...", "distractors": ["...", "..."]}.\n'
+      'Rules:\n'
+      '- "answer" is the CORRECT answer, summarized in ONE short sentence (max ~15 words). '
+      'Do NOT copy long explanations.\n'
+      '- "distractors" is exactly $distractorCount plausible but clearly WRONG short answers, '
+      'each one short sentence, distinct from the answer.\n\n'
+      'Prompt: ${item.front}$known',
     );
     try {
       final cleaned = raw
           .replaceAll(RegExp(r'^```(json)?'), '')
           .replaceAll(RegExp(r'```$'), '')
           .trim();
-      final list = jsonDecode(cleaned) as List;
-      return list.map((e) => e.toString()).take(count).toList();
-    } catch (_) {
-      // Fall back to splitting lines if the model didn't return clean JSON.
-      return raw
-          .split('\n')
-          .map((l) => l.replaceFirst(RegExp(r'^[\-\*\d\.\)\s]+'), '').trim())
-          .where((l) => l.isNotEmpty)
-          .take(count)
+      final map = jsonDecode(cleaned) as Map<String, dynamic>;
+      final answer = (map['answer'] as String).trim();
+      final distractors = (map['distractors'] as List)
+          .map((e) => e.toString().trim())
+          .where((e) => e.isNotEmpty && e != answer)
+          .take(distractorCount)
           .toList();
+      return McQuiz(answer: answer, distractors: distractors);
+    } catch (_) {
+      throw Exception('Gemini returned an unparseable quiz');
     }
   }
 

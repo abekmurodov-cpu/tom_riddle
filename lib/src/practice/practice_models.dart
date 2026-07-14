@@ -23,12 +23,23 @@ enum PracticeMethod {
 enum PracticeScope {
   all,
   due,
+  weakPoints,
   category;
 
   String get label => switch (this) {
         PracticeScope.all => 'All notes',
         PracticeScope.due => 'Due only',
+        PracticeScope.weakPoints => 'Weak points',
         PracticeScope.category => 'Category cram',
+      };
+
+  String get blurb => switch (this) {
+        PracticeScope.all => 'Every note, regardless of schedule.',
+        PracticeScope.due =>
+          'Only notes the spaced-repetition scheduler says are due today.',
+        PracticeScope.weakPoints =>
+          'Notes you last got wrong or keep lapsing on (the red leaves).',
+        PracticeScope.category => 'All notes in one category you choose.',
       };
 }
 
@@ -45,21 +56,26 @@ class PracticeConfig {
   final String? category;
 
   /// Builds the queue from [all] (every note) and [due] (currently-due notes),
-  /// filtered by scope. Multiple-choice needs a recorded answer to quiz against,
-  /// so notes without a `back` are dropped for that method. Order is shuffled.
+  /// filtered by scope. Multiple-choice and type-the-answer need something to
+  /// quiz against: notes without a recorded answer are dropped — UNLESS an LLM
+  /// is attached ([canGenerate]), in which case they're kept and the answer/quiz
+  /// is generated at practice time. Order is shuffled.
   List<KnowledgeItem> buildQueue({
     required List<KnowledgeItem> all,
     required List<KnowledgeItem> due,
+    bool canGenerate = false,
   }) {
     Iterable<KnowledgeItem> pool = switch (scope) {
       PracticeScope.all => all,
       PracticeScope.due => due,
+      PracticeScope.weakPoints => all.where((i) => i.isWeak),
       PracticeScope.category =>
         all.where((i) => (i.category?.trim() ?? '') == category?.trim()),
     };
 
-    if (method == PracticeMethod.multipleChoice ||
-        method == PracticeMethod.typeAnswer) {
+    if ((method == PracticeMethod.multipleChoice ||
+            method == PracticeMethod.typeAnswer) &&
+        !canGenerate) {
       pool = pool.where((i) => i.hasAnswer);
     }
 

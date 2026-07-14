@@ -28,10 +28,38 @@ class GeminiKeyNotifier extends Notifier<String?> {
 final geminiKeyProvider =
     NotifierProvider<GeminiKeyNotifier, String?>(GeminiKeyNotifier.new);
 
+/// Gemini models the user can pick from in Settings.
+const kGeminiModels = <String>[
+  'gemini-2.5-flash',
+  'gemini-2.5-pro',
+  'gemini-2.5-flash-lite',
+  'gemini-2.0-flash',
+];
+
+const kDefaultGeminiModel = 'gemini-2.5-flash';
+
+/// The selected Gemini model, persisted in settings.
+class GeminiModelNotifier extends Notifier<String> {
+  SettingsRepository get _settings => ref.read(settingsRepositoryProvider);
+
+  @override
+  String build() =>
+      _settings.getString(SettingsRepository.kGeminiModel) ?? kDefaultGeminiModel;
+
+  Future<void> set(String model) async {
+    await _settings.setString(SettingsRepository.kGeminiModel, model);
+    state = model;
+  }
+}
+
+final geminiModelProvider =
+    NotifierProvider<GeminiModelNotifier, String>(GeminiModelNotifier.new);
+
 /// The active LLM, or null when no provider is attached. UI features that use
 /// the LLM watch this and hide/fall back when it is null.
 final llmProvider = Provider<LlmProvider?>((ref) {
   final key = ref.watch(geminiKeyProvider);
   if (key == null || key.isEmpty) return null;
-  return GeminiProvider(apiKey: key);
+  final model = ref.watch(geminiModelProvider);
+  return GeminiProvider(apiKey: key, model: model);
 });

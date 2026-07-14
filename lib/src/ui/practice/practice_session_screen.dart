@@ -29,14 +29,18 @@ class PracticeSessionScreen extends ConsumerStatefulWidget {
 
 class _PracticeSessionScreenState
     extends ConsumerState<PracticeSessionScreen> {
+  // Local, mutable copy so generated answers/quizzes update the current card.
+  late final List<KnowledgeItem> _queue = List.of(widget.queue);
   int _index = 0;
   int _correctCount = 0;
 
+  // Prep (AI answer/quiz generation) in flight for the current card.
+  bool _preparing = false;
   // Flashcard state.
   bool _revealed = false;
   // Multiple-choice state.
   List<String>? _options;
-  bool _loadingOptions = false;
+  String? _correctOption;
   String? _chosen;
   // Type-the-answer state.
   final _answerController = TextEditingController();
@@ -57,40 +61,80 @@ class _PracticeSessionScreenState
     super.dispose();
   }
 
-  KnowledgeItem get _item => widget.queue[_index];
+  KnowledgeItem get _item => _queue[_index];
 
+  void _setItem(KnowledgeItem updated) {
+    if (!mounted) return;
+    setState(() => _queue[_index] = updated);
+  }
+
+  /// Prepares the current card: generate a missing answer (so answer-less facts
+  /// are practiceable), and for multiple choice ensure a cached option set.
   Future<void> _prepareItem() async {
+    setState(() {
+      _preparing = true;
+      _options = null;
+      _correctOption = null;
+    });
+    await _ensureAnswer();
     if (widget.config.method == PracticeMethod.multipleChoice) {
-      await _loadOptions();
+      await _ensureOptions();
+    }
+    if (mounted) setState(() => _preparing = false);
+  }
+
+  /// Fills in an answer for a note that has none, when an LLM is attached, and
+  /// caches it so the note shows up in future practice.
+  Future<void> _ensureAnswer() async {
+    if (_item.hasAnswer) return;
+    final llm = ref.read(llmProvider);
+    if (llm == null) return;
+    try {
+      final answer = await llm.expandNote(_item);
+      final updated = _item.copyWith(back: answer);
+      _setItem(updated);
+      await ref.read(knowledgeListProvider.notifier).persist(updated);
+    } catch (_) {
+      // Leave it answer-less; flashcard still works, MC falls back below.
     }
   }
 
-  Future<void> _loadOptions() async {
-    setState(() {
-      _loadingOptions = true;
-      _options = null;
-    });
-    final item = _item;
-    final correct = item.back ?? '';
+  /// Ensures [_options]/[_correctOption] are ready: reuse the note's cached MC
+  /// quiz, else generate one with the LLM (and cache it), else fall back to
+  /// distractors drawn from other notes.
+  Future<void> _ensureOptions() async {
+    String correct;
     List<String> distractors;
-    final llm = ref.read(llmProvider);
-    if (llm != null) {
-      try {
-        distractors = await llm.generatePractice(item, count: 3);
-      } catch (_) {
-        distractors = _localDistractors(item);
-      }
+
+    if (_item.hasMcOptions) {
+      correct = _item.mcAnswer!;
+      distractors = _item.mcDistractors;
     } else {
-      distractors = _localDistractors(item);
+      final llm = ref.read(llmProvider);
+      if (llm != null) {
+        try {
+          final quiz = await llm.generateQuiz(_item);
+          correct = quiz.answer;
+          distractors = quiz.distractors;
+          final updated =
+              _item.copyWith(mcAnswer: correct, mcDistractors: distractors);
+          _setItem(updated);
+          await ref.read(knowledgeListProvider.notifier).persist(updated);
+        } catch (_) {
+          correct = _item.back ?? _item.front;
+          distractors = _localDistractors(_item);
+        }
+      } else {
+        correct = _item.back ?? _item.front;
+        distractors = _localDistractors(_item);
+      }
     }
-    // Ensure uniqueness and that the correct answer is present exactly once.
-    final set = <String>{correct, ...distractors}.take(4).toList();
-    if (!set.contains(correct)) set[0] = correct;
-    set.shuffle();
+
+    final options = <String>{correct, ...distractors}.toList()..shuffle();
     if (!mounted) return;
     setState(() {
-      _options = set;
-      _loadingOptions = false;
+      _correctOption = correct;
+      _options = options;
     });
   }
 
@@ -134,21 +178,22 @@ class _PracticeSessionScreenState
       _revealed = false;
       _chosen = null;
       _options = null;
+      _correctOption = null;
       _wasCorrect = null;
       _feedback = null;
       _answerController.clear();
     });
-    if (_index < widget.queue.length) _prepareItem();
+    if (_index < _queue.length) _prepareItem();
   }
 
   @override
   Widget build(BuildContext context) {
-    final done = _index >= widget.queue.length;
+    final done = _index >= _queue.length;
     return Scaffold(
       appBar: AppBar(
         title: Text(done
             ? 'Done'
-            : '${widget.config.method.label}  ${_index + 1}/${widget.queue.length}'),
+            : '${widget.config.method.label}  ${_index + 1}/${_queue.length}'),
       ),
       body: done ? _buildDone() : _buildBody(),
     );
@@ -226,29 +271,34 @@ class _PracticeSessionScreenState
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-          child: _revealed || !_item.hasAnswer
-              ? Row(
-                  children: [
-                    for (final grade in ReviewGrade.values)
-                      Expanded(
-                        child: Padding(
-                          padding:
-                              const EdgeInsets.symmetric(horizontal: 4),
-                          child: OutlinedButton(
-                            onPressed: () => _grade(grade),
-                            child: Text(grade.label),
-                          ),
-                        ),
-                      ),
-                  ],
+          child: _preparing
+              ? const Padding(
+                  padding: EdgeInsets.all(8),
+                  child: Center(child: CircularProgressIndicator()),
                 )
-              : FilledButton.tonal(
-                  onPressed: () => setState(() => _revealed = true),
-                  child: const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 8),
-                    child: Text('Reveal answer'),
-                  ),
-                ),
+              : _revealed || !_item.hasAnswer
+                  ? Row(
+                      children: [
+                        for (final grade in ReviewGrade.values)
+                          Expanded(
+                            child: Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 4),
+                              child: OutlinedButton(
+                                onPressed: () => _grade(grade),
+                                child: Text(grade.label),
+                              ),
+                            ),
+                          ),
+                      ],
+                    )
+                  : FilledButton.tonal(
+                      onPressed: () => setState(() => _revealed = true),
+                      child: const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 8),
+                        child: Text('Reveal answer'),
+                      ),
+                    ),
         ),
       ],
     );
@@ -261,7 +311,7 @@ class _PracticeSessionScreenState
       children: [
         _promptCard(context),
         Expanded(
-          child: _loadingOptions || _options == null
+          child: _preparing || _options == null
               ? const Center(child: CircularProgressIndicator())
               : ListView(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -269,14 +319,14 @@ class _PracticeSessionScreenState
                     for (final option in _options!)
                       _OptionTile(
                         text: option,
-                        correctAnswer: _item.back ?? '',
+                        correctAnswer: _correctOption ?? '',
                         chosen: _chosen,
                         answered: answered,
                         onTap: answered
                             ? null
                             : () {
                                 setState(() => _chosen = option);
-                                _submitObjective(option == _item.back);
+                                _submitObjective(option == _correctOption);
                               },
                       ),
                   ],
@@ -312,8 +362,8 @@ class _PracticeSessionScreenState
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: FilledButton(
-              onPressed: _grading ? null : _checkTyped,
-              child: _grading
+              onPressed: (_grading || _preparing) ? null : _checkTyped,
+              child: (_grading || _preparing)
                   ? const SizedBox(
                       width: 18,
                       height: 18,
@@ -333,7 +383,7 @@ class _PracticeSessionScreenState
   Future<void> _checkTyped() async {
     final guess = _answerController.text.trim();
     if (guess.isEmpty) return;
-    final expected = _item.back ?? '';
+    final expected = _item.back ?? _item.mcAnswer ?? '';
     final llm = ref.read(llmProvider);
     setState(() => _grading = true);
     bool correct;

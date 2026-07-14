@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../llm/llm_providers.dart';
 import '../../practice/practice_models.dart';
 import '../../providers/knowledge_providers.dart';
 import 'practice_session_screen.dart';
@@ -26,7 +27,8 @@ class _PracticeScreenState extends ConsumerState<PracticeScreen> {
     );
     final all = ref.read(notesSortedProvider);
     final due = ref.read(dueItemsProvider);
-    final queue = config.buildQueue(all: all, due: due);
+    final canGenerate = ref.read(llmProvider) != null;
+    final queue = config.buildQueue(all: all, due: due, canGenerate: canGenerate);
 
     if (queue.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -80,6 +82,7 @@ class _PracticeScreenState extends ConsumerState<PracticeScreen> {
                   RadioListTile<PracticeScope>(
                     value: s,
                     title: Text(s.label),
+                    subtitle: Text(s.blurb),
                     contentPadding: EdgeInsets.zero,
                   ),
               ],

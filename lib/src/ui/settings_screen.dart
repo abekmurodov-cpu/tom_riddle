@@ -171,16 +171,44 @@ class _LlmSectionState extends ConsumerState<_LlmSection> {
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16),
         child: attached
-            ? Row(
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(Icons.check_circle, color: Color(0xFF2E9E4F)),
-                  const SizedBox(width: 12),
-                  const Expanded(child: Text('Gemini attached')),
-                  TextButton.icon(
-                    onPressed: () =>
-                        ref.read(geminiKeyProvider.notifier).detach(),
-                    icon: const Icon(Icons.link_off),
-                    label: const Text('Detach'),
+                  Row(
+                    children: [
+                      const Icon(Icons.check_circle, color: Color(0xFF2E9E4F)),
+                      const SizedBox(width: 12),
+                      const Expanded(child: Text('Gemini attached')),
+                      TextButton.icon(
+                        onPressed: () =>
+                            ref.read(geminiKeyProvider.notifier).detach(),
+                        icon: const Icon(Icons.link_off),
+                        label: const Text('Detach'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  InputDecorator(
+                    decoration: const InputDecoration(
+                      labelText: 'Model',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        isExpanded: true,
+                        value: ref.watch(geminiModelProvider),
+                        items: [
+                          for (final m in kGeminiModels)
+                            DropdownMenuItem(value: m, child: Text(m)),
+                        ],
+                        onChanged: (m) {
+                          if (m != null) {
+                            ref.read(geminiModelProvider.notifier).set(m);
+                          }
+                        },
+                      ),
+                    ),
                   ),
                 ],
               )

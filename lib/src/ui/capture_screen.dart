@@ -24,6 +24,9 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   bool _saving = false;
   bool _aiBusy = false;
   Uint8List? _imageBytes;
+  // Pre-generated multiple-choice quiz, cached when the answer is AI-generated.
+  String? _mcAnswer;
+  List<String> _mcDistractors = const [];
 
   @override
   void dispose() {
@@ -40,16 +43,25 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     if (front.isEmpty) return;
     setState(() => _aiBusy = true);
     try {
-      final answer = await llm.expandNote(
-        KnowledgeItem(
-          id: '',
-          front: front,
-          type: _type,
-          createdAt: DateTime.now(),
-          dueDate: DateTime.now(),
-        ),
+      final now = DateTime.now();
+      final probe = KnowledgeItem(
+        id: '',
+        front: front,
+        back: _backController.text.trim().isEmpty ? null : _backController.text.trim(),
+        type: _type,
+        createdAt: now,
+        dueDate: now,
       );
+      // Fill the detailed answer, then pre-build a concise MC quiz to cache.
+      final answer = await llm.expandNote(probe);
       if (mounted) _backController.text = answer;
+      try {
+        final quiz = await llm.generateQuiz(probe.copyWith(back: answer));
+        _mcAnswer = quiz.answer;
+        _mcDistractors = quiz.distractors;
+      } catch (_) {
+        // Non-fatal: MC options will be generated lazily during practice.
+      }
     } catch (e) {
       _showError('Could not generate: $e');
     } finally {
@@ -91,6 +103,8 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
           type: _type,
           category: _categoryController.text,
           imageBytes: _imageBytes,
+          mcAnswer: _mcAnswer,
+          mcDistractors: _mcDistractors,
         );
     if (mounted) Navigator.of(context).pop();
   }
