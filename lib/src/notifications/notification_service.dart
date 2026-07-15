@@ -4,8 +4,8 @@ import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 
-/// Schedules local "time to review" reminders. Android-only in practice —
-/// every method is a safe no-op on web (the plugin has no web implementation).
+/// Schedules local "time to review" reminders on Android and macOS — a safe
+/// no-op on web (the plugin has no web implementation).
 class NotificationService {
   NotificationService([FlutterLocalNotificationsPlugin? plugin])
       : _plugin = plugin ?? FlutterLocalNotificationsPlugin();
@@ -14,13 +14,15 @@ class NotificationService {
   bool _ready = false;
 
   static const int _dailyReminderId = 1001;
-  static const AndroidNotificationDetails _androidDetails =
-      AndroidNotificationDetails(
-    'review_reminders',
-    'Review reminders',
-    channelDescription: 'Daily nudges to review your knowledge',
-    importance: Importance.defaultImportance,
-    priority: Priority.defaultPriority,
+  static const NotificationDetails _details = NotificationDetails(
+    android: AndroidNotificationDetails(
+      'review_reminders',
+      'Review reminders',
+      channelDescription: 'Daily nudges to review your knowledge',
+      importance: Importance.defaultImportance,
+      priority: Priority.defaultPriority,
+    ),
+    macOS: DarwinNotificationDetails(),
   );
 
   /// Initializes the plugin and the timezone database. Call once at startup.
@@ -35,18 +37,33 @@ class NotificationService {
     }
     const settings = InitializationSettings(
       android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+      macOS: DarwinInitializationSettings(
+        requestAlertPermission: false,
+        requestBadgePermission: false,
+        requestSoundPermission: false,
+      ),
     );
     await _plugin.initialize(settings);
     _ready = true;
   }
 
-  /// Requests notification permission (Android 13+). Returns true if granted.
+  /// Requests notification permission (Android 13+, macOS). Returns true if
+  /// granted (or if the platform doesn't gate it).
   Future<bool> requestPermission() async {
     if (kIsWeb || !_ready) return false;
     final android = _plugin.resolvePlatformSpecificImplementation<
         AndroidFlutterLocalNotificationsPlugin>();
-    final granted = await android?.requestNotificationsPermission();
-    return granted ?? true;
+    if (android != null) {
+      return await android.requestNotificationsPermission() ?? true;
+    }
+    final macos = _plugin.resolvePlatformSpecificImplementation<
+        MacOSFlutterLocalNotificationsPlugin>();
+    if (macos != null) {
+      return await macos.requestPermissions(
+              alert: true, badge: true, sound: true) ??
+          true;
+    }
+    return false;
   }
 
   /// (Re)schedules a daily reminder at [hour]:[minute]. Uses inexact scheduling
@@ -59,7 +76,7 @@ class NotificationService {
       'Knowledge',
       'Time to review — your notes are waiting to challenge you.',
       _nextInstanceOf(hour, minute),
-      const NotificationDetails(android: _androidDetails),
+      _details,
       androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
       matchDateTimeComponents: DateTimeComponents.time,
     );
