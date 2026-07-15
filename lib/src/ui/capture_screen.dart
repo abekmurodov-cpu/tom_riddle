@@ -60,9 +60,11 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         final quiz = await llm.generateQuiz(probe.copyWith(back: answer));
         _mcAnswer = quiz.answer;
         _mcDistractors = quiz.distractors;
-        // For bare facts, keep the generated question so practice asks it
-        // instead of echoing the fact. Other note types keep their own prompt.
-        _quizQuestion = _type == KnowledgeType.fact ? quiz.question : null;
+        // Reword content notes (fact, code, command, concept) into a real
+        // question so practice asks it instead of echoing the note. Notes
+        // already phrased as a question keep their own prompt.
+        _quizQuestion =
+            _type != KnowledgeType.question ? quiz.question : null;
       } catch (_) {
         // Non-fatal: the quiz will be generated lazily during practice.
       }

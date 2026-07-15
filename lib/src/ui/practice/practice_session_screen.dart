@@ -89,7 +89,11 @@ class _PracticeSessionScreenState
   /// asks a real question instead of echoing the fact; the answer is cached so
   /// answer-less facts become practiceable and future runs are instant.
   Future<void> _ensureQuiz() async {
-    if (_item.hasMcOptions) return;
+    // Non-question notes need a reworded prompt; regenerate if an older cached
+    // quiz predates that (has options but no quizQuestion).
+    final missingQuestion = _item.type != KnowledgeType.question &&
+        (_item.quizQuestion == null || _item.quizQuestion!.trim().isEmpty);
+    if (_item.hasMcOptions && !missingQuestion) return;
     final llm = ref.read(llmProvider);
     if (llm == null) return;
     try {
@@ -99,9 +103,9 @@ class _PracticeSessionScreenState
         mcDistractors: quiz.distractors,
         back: _item.hasAnswer ? _item.back : quiz.answer,
       );
-      // Rewrite the shown prompt only for bare facts; other note types keep
-      // their own wording.
-      if (_item.type == KnowledgeType.fact) {
+      // Reword the shown prompt for any content note (fact, code, command,
+      // concept); notes already phrased as a question keep their own wording.
+      if (_item.type != KnowledgeType.question) {
         updated = updated.copyWith(quizQuestion: quiz.question);
       }
       _setItem(updated);
@@ -130,11 +134,13 @@ class _PracticeSessionScreenState
     });
   }
 
-  /// The answer to reveal / check for the current note. Facts prefer the concise
-  /// [mcAnswer]; other notes prefer their detailed [back].
-  String? get _revealAnswer => _item.type == KnowledgeType.fact
-      ? (_item.mcAnswer ?? _item.back)
-      : (_item.back ?? _item.mcAnswer);
+  /// The answer to reveal / check for the current note. When the prompt was
+  /// reworded into a generated question, the matching answer is the concise
+  /// [mcAnswer]; otherwise prefer the note's own detailed [back].
+  String? get _revealAnswer =>
+      (_item.quizQuestion != null && _item.quizQuestion!.trim().isNotEmpty)
+          ? (_item.mcAnswer ?? _item.back)
+          : (_item.back ?? _item.mcAnswer);
 
   bool get _canReveal => _revealAnswer?.trim().isNotEmpty ?? false;
 
