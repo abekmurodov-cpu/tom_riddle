@@ -44,6 +44,9 @@ class KnowledgeItem {
     this.quizQuestion,
     this.mcAnswer,
     this.mcDistractors = const [],
+    this.fillBlankTemplate,
+    this.fillBlankAnswers = const [],
+    this.reorderSegments = const [],
   }) : updatedAt = updatedAt ?? createdAt;
 
   final String id;
@@ -89,6 +92,18 @@ class KnowledgeItem {
   /// Three short plausible-but-wrong options paired with [mcAnswer].
   final List<String> mcDistractors;
 
+  // --- Pre-generated code drills (code notes only; no LLM at practice) ---
+  /// The code with blanks replaced by «0», «1», … placeholders, paired with
+  /// [fillBlankAnswers]. Used by the fill-in-the-blank coding drill.
+  final String? fillBlankTemplate;
+
+  /// The removed tokens, in placeholder order, for the fill-in-the-blank drill.
+  final List<String> fillBlankAnswers;
+
+  /// The code split into logical chunks in their correct order. The reorder
+  /// drill shuffles these and asks the user to restore the order.
+  final List<String> reorderSegments;
+
   bool get hasAnswer => back != null && back!.trim().isNotEmpty;
 
   /// What practice shows as the prompt: the generated [quizQuestion] if present,
@@ -101,6 +116,10 @@ class KnowledgeItem {
   /// True once a full multiple-choice set (correct + ≥1 distractor) is cached.
   bool get hasMcOptions =>
       mcAnswer != null && mcAnswer!.trim().isNotEmpty && mcDistractors.isNotEmpty;
+
+  /// True once at least one code drill has been pre-generated for this note.
+  bool get hasCodeDrills =>
+      fillBlankAnswers.isNotEmpty || reorderSegments.length > 1;
 
   /// Weak point: recently missed, or lapsed repeatedly. Drives the "Weak points"
   /// practice scope and the red tree leaves.
@@ -125,6 +144,9 @@ class KnowledgeItem {
     String? quizQuestion,
     String? mcAnswer,
     List<String>? mcDistractors,
+    String? fillBlankTemplate,
+    List<String>? fillBlankAnswers,
+    List<String>? reorderSegments,
   }) {
     return KnowledgeItem(
       id: id,
@@ -145,6 +167,9 @@ class KnowledgeItem {
       quizQuestion: quizQuestion ?? this.quizQuestion,
       mcAnswer: mcAnswer ?? this.mcAnswer,
       mcDistractors: mcDistractors ?? this.mcDistractors,
+      fillBlankTemplate: fillBlankTemplate ?? this.fillBlankTemplate,
+      fillBlankAnswers: fillBlankAnswers ?? this.fillBlankAnswers,
+      reorderSegments: reorderSegments ?? this.reorderSegments,
     );
   }
 
@@ -167,6 +192,9 @@ class KnowledgeItem {
         'quizQuestion': quizQuestion,
         'mcAnswer': mcAnswer,
         'mcDistractors': mcDistractors,
+        'fillBlankTemplate': fillBlankTemplate,
+        'fillBlankAnswers': fillBlankAnswers,
+        'reorderSegments': reorderSegments,
       };
 
   factory KnowledgeItem.fromMap(Map<String, dynamic> map) => KnowledgeItem(
@@ -196,6 +224,13 @@ class KnowledgeItem {
         mcAnswer: map['mcAnswer'] as String?,
         mcDistractors:
             (map['mcDistractors'] as List?)?.map((e) => e.toString()).toList() ??
+                const [],
+        fillBlankTemplate: map['fillBlankTemplate'] as String?,
+        fillBlankAnswers:
+            (map['fillBlankAnswers'] as List?)?.map((e) => e.toString()).toList() ??
+                const [],
+        reorderSegments:
+            (map['reorderSegments'] as List?)?.map((e) => e.toString()).toList() ??
                 const [],
       );
 

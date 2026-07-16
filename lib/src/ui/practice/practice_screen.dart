@@ -60,7 +60,29 @@ class _PracticeScreenState extends ConsumerState<PracticeScreen> {
             onChanged: (v) => setState(() => _method = v!),
             child: Column(
               children: [
-                for (final m in PracticeMethod.values)
+                for (final m in PracticeMethod.values.where((m) => !m.isCoding))
+                  RadioListTile<PracticeMethod>(
+                    value: m,
+                    title: Text(m.label),
+                    subtitle: Text(m.blurb),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 8, bottom: 4),
+                  child: Row(
+                    children: [
+                      Icon(Icons.code, size: 16, color: theme.colorScheme.primary),
+                      const SizedBox(width: 6),
+                      Text('Coding drills',
+                          style: theme.textTheme.labelLarge
+                              ?.copyWith(color: theme.colorScheme.primary)),
+                      const SizedBox(width: 6),
+                      Text('(code notes only)',
+                          style: theme.textTheme.labelSmall),
+                    ],
+                  ),
+                ),
+                for (final m in PracticeMethod.values.where((m) => m.isCoding))
                   RadioListTile<PracticeMethod>(
                     value: m,
                     title: Text(m.label),

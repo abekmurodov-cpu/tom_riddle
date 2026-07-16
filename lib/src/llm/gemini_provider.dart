@@ -136,6 +136,34 @@ class GeminiProvider implements LlmProvider {
   }
 
   @override
+  Future<LlmGrade> gradeCode(KnowledgeItem item, String submitted) async {
+    final raw = await _generate(
+      'Grade a coding exercise. The student rewrote a code snippet from memory. '
+      'Pass if the submission is syntactically valid and accomplishes the same '
+      'thing as the reference — it need NOT be identical (different names, '
+      'formatting, or equivalent constructs are fine). Fail only for wrong logic '
+      'or broken syntax.\n'
+      'Return JSON: {"correct": true|false, "feedback": "one short sentence"}.\n\n'
+      'Reference:\n${item.front}\n\nStudent:\n$submitted',
+    );
+    try {
+      final cleaned = raw
+          .replaceAll(RegExp(r'^```(json)?'), '')
+          .replaceAll(RegExp(r'```$'), '')
+          .trim();
+      final map = jsonDecode(cleaned) as Map<String, dynamic>;
+      return LlmGrade(
+        correct: map['correct'] == true,
+        feedback: map['feedback'] as String?,
+      );
+    } catch (_) {
+      final lower = raw.toLowerCase();
+      final correct = lower.contains('correct') && !lower.contains('incorrect');
+      return LlmGrade(correct: correct, feedback: raw);
+    }
+  }
+
+  @override
   Future<String> suggestCategory(String front, String? back) async {
     final text = await _generate(
       'Suggest ONE short category label (1-2 words, Title Case) for this note. '

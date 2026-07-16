@@ -1,13 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:flutter/foundation.dart';
+
 import '../../llm/llm_providers.dart';
 import '../../models/knowledge_item.dart';
 import '../../practice/answer_matching.dart';
+import '../../practice/code_drills.dart';
 import '../../practice/practice_models.dart';
 import '../../providers/knowledge_providers.dart';
 import '../../scheduler/spaced_repetition.dart';
 import '../widgets/note_image.dart';
+
+const TextStyle _monoStyle = TextStyle(fontFamily: 'monospace', fontSize: 13);
 
 /// Runs a configured practice session over [queue]. Each answered card feeds the
 /// SM-2 scheduler (correct → good, wrong → again), which updates the note's
@@ -42,9 +47,13 @@ class _PracticeSessionScreenState
   List<String>? _options;
   String? _correctOption;
   String? _chosen;
-  // Type-the-answer state.
+  // Type-the-answer / write-the-code state.
   final _answerController = TextEditingController();
-  // Shared "answered" result for MC / type.
+  // Fill-in-the-blank: one controller per blank.
+  final List<TextEditingController> _blankControllers = [];
+  // Reorder: current arrangement as indices into the note's reorderSegments.
+  List<int> _reorderCurrent = [];
+  // Shared "answered" result for objective modes.
   bool? _wasCorrect;
   String? _feedback;
   bool _grading = false;
@@ -58,7 +67,17 @@ class _PracticeSessionScreenState
   @override
   void dispose() {
     _answerController.dispose();
+    for (final c in _blankControllers) {
+      c.dispose();
+    }
     super.dispose();
+  }
+
+  void _disposeBlankControllers() {
+    for (final c in _blankControllers) {
+      c.dispose();
+    }
+    _blankControllers.clear();
   }
 
   KnowledgeItem get _item => _queue[_index];
@@ -77,11 +96,53 @@ class _PracticeSessionScreenState
       _options = null;
       _correctOption = null;
     });
-    await _ensureQuiz();
-    if (widget.config.method == PracticeMethod.multipleChoice) {
-      _buildOptions();
+    switch (widget.config.method) {
+      case PracticeMethod.multipleChoice:
+        await _ensureQuiz();
+        _buildOptions();
+      case PracticeMethod.flashcard:
+      case PracticeMethod.typeAnswer:
+        await _ensureQuiz();
+      case PracticeMethod.fillBlank:
+      case PracticeMethod.reorder:
+        await _ensureDrills();
+        _setupCoding();
+      case PracticeMethod.codeSnippet:
+        break; // graded on submit against the reference code
     }
     if (mounted) setState(() => _preparing = false);
+  }
+
+  /// Generates + caches code drills (deterministically, no LLM) for the current
+  /// note if they aren't stored yet.
+  Future<void> _ensureDrills() async {
+    if (_item.hasCodeDrills) return;
+    final drills = generateCodeDrills(_item.front);
+    final updated = _item.copyWith(
+      fillBlankTemplate: drills.fillBlankTemplate,
+      fillBlankAnswers: drills.fillBlankAnswers,
+      reorderSegments: drills.reorderSegments,
+    );
+    _setItem(updated);
+    await ref.read(knowledgeListProvider.notifier).persist(updated);
+  }
+
+  /// Prepares per-blank controllers or a shuffled reorder list for the current
+  /// coding drill.
+  void _setupCoding() {
+    _disposeBlankControllers();
+    _blankControllers.addAll(
+      List.generate(_item.fillBlankAnswers.length, (_) => TextEditingController()),
+    );
+    _reorderCurrent = _shuffledOrder(_item.reorderSegments.length);
+  }
+
+  /// A shuffled index order [0..n) that differs from the sorted answer order.
+  List<int> _shuffledOrder(int n) {
+    final identity = List.generate(n, (i) => i);
+    if (n < 2) return identity;
+    final order = List.of(identity)..shuffle();
+    return listEquals(order, identity) ? order.reversed.toList() : order;
   }
 
   /// Generates and caches a quiz for the current note when one isn't stored yet
@@ -179,6 +240,7 @@ class _PracticeSessionScreenState
 
   void _advance() {
     if (!mounted) return;
+    _disposeBlankControllers();
     setState(() {
       _index++;
       _revealed = false;
@@ -187,6 +249,7 @@ class _PracticeSessionScreenState
       _correctOption = null;
       _wasCorrect = null;
       _feedback = null;
+      _reorderCurrent = [];
       _answerController.clear();
     });
     if (_index < _queue.length) _prepareItem();
@@ -210,6 +273,9 @@ class _PracticeSessionScreenState
       PracticeMethod.flashcard => _buildFlashcard(),
       PracticeMethod.multipleChoice => _buildMultipleChoice(),
       PracticeMethod.typeAnswer => _buildTypeAnswer(),
+      PracticeMethod.codeSnippet => _buildCodeSnippet(),
+      PracticeMethod.fillBlank => _buildFillBlank(),
+      PracticeMethod.reorder => _buildReorder(),
     };
   }
 
@@ -455,6 +521,255 @@ class _PracticeSessionScreenState
           child: Text(_index + 1 >= widget.queue.length ? 'Finish' : 'Next'),
         ),
       ),
+    );
+  }
+
+  // --- Write the code -----------------------------------------------------
+  Widget _buildCodeSnippet() {
+    final answered = _wasCorrect != null;
+    final task = _item.back ??
+        _item.quizQuestion ??
+        'Reproduce this code snippet from memory.';
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        _codeTaskHeader('Write the code', task),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _answerController,
+          enabled: !answered,
+          minLines: 5,
+          maxLines: 16,
+          style: _monoStyle,
+          decoration: const InputDecoration(
+            labelText: 'Your code',
+            alignLabelWithHint: true,
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 12),
+        if (!answered)
+          FilledButton(
+            onPressed: _grading ? null : _checkCode,
+            child: _grading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Text('Check'),
+          )
+        else ...[
+          _resultBanner(),
+          const SizedBox(height: 12),
+          _referenceCodeBlock(),
+          const SizedBox(height: 12),
+          _nextBar(),
+        ],
+      ],
+    );
+  }
+
+  Future<void> _checkCode() async {
+    final submitted = _answerController.text;
+    if (submitted.trim().isEmpty) return;
+    final llm = ref.read(llmProvider);
+    setState(() => _grading = true);
+    bool correct;
+    String? feedback;
+    if (llm != null) {
+      try {
+        final g = await llm.gradeCode(_item, submitted);
+        correct = g.correct;
+        feedback = g.feedback;
+      } catch (_) {
+        correct = codeMatches(submitted, _item.front);
+        feedback = 'AI check failed; used a whitespace-insensitive match.';
+      }
+    } else {
+      correct = codeMatches(submitted, _item.front);
+      feedback = correct
+          ? null
+          : 'Offline check needs an equivalent match (ignoring whitespace and '
+              'comments). Attach Gemini to accept any working code.';
+    }
+    if (!mounted) return;
+    setState(() => _grading = false);
+    await _submitObjective(correct, feedback: feedback);
+  }
+
+  // --- Fill in the blank --------------------------------------------------
+  Widget _buildFillBlank() {
+    if (_preparing) return const Center(child: CircularProgressIndicator());
+    final answered = _wasCorrect != null;
+    final answers = _item.fillBlankAnswers;
+    final template = _item.fillBlankTemplate ?? _item.front;
+    final display = template.replaceAllMapped(
+      fillBlankPlaceholderPattern,
+      (m) => '[${int.parse(m.group(1)!) + 1}]',
+    );
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        _codeTaskHeader('Fill in the blanks',
+            'Type the token that belongs in each numbered blank.'),
+        const SizedBox(height: 12),
+        _codeBlock(display),
+        const SizedBox(height: 16),
+        for (var i = 0; i < answers.length; i++)
+          _blankField(i, answers[i], answered),
+        const SizedBox(height: 8),
+        if (!answered)
+          FilledButton(onPressed: _checkBlanks, child: const Text('Check'))
+        else ...[
+          _resultBanner(),
+          const SizedBox(height: 12),
+          _nextBar(),
+        ],
+      ],
+    );
+  }
+
+  Widget _blankField(int i, String answer, bool answered) {
+    final correct = _blankControllers[i].text.trim() == answer.trim();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: TextField(
+        controller: _blankControllers[i],
+        enabled: !answered,
+        style: _monoStyle,
+        decoration: InputDecoration(
+          isDense: true,
+          prefixText: '${i + 1}.  ',
+          border: const OutlineInputBorder(),
+          suffixIcon: answered
+              ? Icon(correct ? Icons.check : Icons.close,
+                  color: correct
+                      ? const Color(0xFF2E9E4F)
+                      : const Color(0xFFD64545))
+              : null,
+          helperText: answered && !correct ? 'Answer: $answer' : null,
+        ),
+      ),
+    );
+  }
+
+  void _checkBlanks() {
+    final answers = _item.fillBlankAnswers;
+    var allCorrect = answers.isNotEmpty;
+    for (var i = 0; i < answers.length; i++) {
+      if (_blankControllers[i].text.trim() != answers[i].trim()) {
+        allCorrect = false;
+      }
+    }
+    _submitObjective(allCorrect);
+  }
+
+  // --- Reorder the code ---------------------------------------------------
+  Widget _buildReorder() {
+    if (_preparing) return const Center(child: CircularProgressIndicator());
+    final answered = _wasCorrect != null;
+    final segments = _item.reorderSegments;
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: _codeTaskHeader(
+              'Reorder the code', 'Drag the lines into the correct order.'),
+        ),
+        Expanded(
+          child: ReorderableListView.builder(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            itemCount: _reorderCurrent.length,
+            buildDefaultDragHandles: !answered,
+            onReorderItem: _onReorder,
+            itemBuilder: (context, i) {
+              final idx = _reorderCurrent[i];
+              final correctHere = idx == i;
+              final border = !answered
+                  ? null
+                  : (correctHere
+                      ? const Color(0xFF2E9E4F)
+                      : const Color(0xFFD64545));
+              return Card(
+                key: ValueKey(idx),
+                margin: const EdgeInsets.symmetric(vertical: 4),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  side: border == null
+                      ? BorderSide.none
+                      : BorderSide(color: border, width: 2),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 12, 40, 12),
+                  child: Text(segments[idx], style: _monoStyle),
+                ),
+              );
+            },
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: answered
+              ? Column(
+                  children: [_resultBanner(), const SizedBox(height: 12), _nextBar()])
+              : SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                      onPressed: _checkReorder, child: const Text('Check')),
+                ),
+        ),
+      ],
+    );
+  }
+
+  // onReorderItem pre-adjusts newIndex for the removed item, so no -1 fixup.
+  void _onReorder(int oldIndex, int newIndex) {
+    if (_wasCorrect != null) return;
+    setState(() {
+      final moved = _reorderCurrent.removeAt(oldIndex);
+      _reorderCurrent.insert(newIndex, moved);
+    });
+  }
+
+  void _checkReorder() {
+    final ordered = [for (final idx in _reorderCurrent) _item.reorderSegments[idx]];
+    _submitObjective(listEquals(ordered, _item.reorderSegments));
+  }
+
+  // --- Shared code widgets ------------------------------------------------
+  Widget _codeTaskHeader(String title, String subtitle) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title.toUpperCase(),
+            style: theme.textTheme.labelSmall?.copyWith(letterSpacing: 1.2)),
+        const SizedBox(height: 4),
+        Text(subtitle, style: theme.textTheme.bodyMedium),
+      ],
+    );
+  }
+
+  Widget _codeBlock(String code) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(code, style: _monoStyle),
+    );
+  }
+
+  Widget _referenceCodeBlock() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Reference', style: Theme.of(context).textTheme.labelSmall),
+        const SizedBox(height: 4),
+        _codeBlock(_item.front),
+      ],
     );
   }
 

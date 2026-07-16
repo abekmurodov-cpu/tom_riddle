@@ -45,6 +45,11 @@ abstract class LlmProvider {
   /// Judges whether [answer] is a correct response to [item].
   Future<LlmGrade> gradeAnswer(KnowledgeItem item, String answer);
 
+  /// Grades a rewritten code snippet against the note's reference code: passes
+  /// when [submitted] is valid, working code that accomplishes the same thing
+  /// (it need not be identical). Judges syntax/logic, not exact text.
+  Future<LlmGrade> gradeCode(KnowledgeItem item, String submitted);
+
   /// Suggests a short category/tag for a freshly captured note.
   Future<String> suggestCategory(String front, String? back);
 }

@@ -6,6 +6,7 @@ import 'package:uuid/uuid.dart';
 import '../data/image_store.dart';
 import '../data/knowledge_repository.dart';
 import '../models/knowledge_item.dart';
+import '../practice/code_drills.dart';
 import '../scheduler/spaced_repetition.dart';
 
 /// Bound to the concrete repository in `main` via a ProviderScope override.
@@ -46,6 +47,11 @@ class KnowledgeListNotifier extends AsyncNotifier<List<KnowledgeItem>> {
     if (imageBytes != null) {
       await _images.putBytes(id, imageBytes);
     }
+    // Code notes get their fill-in-the-blank / reorder drills pre-generated
+    // now (deterministically, no LLM) so those modes never cost API credits.
+    final drills = type == KnowledgeType.code
+        ? generateCodeDrills(front.trim())
+        : null;
     final item = KnowledgeItem(
       id: id,
       front: front.trim(),
@@ -58,6 +64,9 @@ class KnowledgeListNotifier extends AsyncNotifier<List<KnowledgeItem>> {
       quizQuestion: quizQuestion,
       mcAnswer: mcAnswer,
       mcDistractors: mcDistractors,
+      fillBlankTemplate: drills?.fillBlankTemplate,
+      fillBlankAnswers: drills?.fillBlankAnswers ?? const [],
+      reorderSegments: drills?.reorderSegments ?? const [],
     );
     await _repo.save(item);
     await _refresh();

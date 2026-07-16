@@ -1,22 +1,40 @@
 import '../models/knowledge_item.dart';
+import 'code_drills.dart';
 
-/// How the user is quizzed during a practice session.
+/// How the user is quizzed during a practice session. The last three are the
+/// "coding branch": they only apply to code notes.
 enum PracticeMethod {
   flashcard,
   multipleChoice,
-  typeAnswer;
+  typeAnswer,
+  codeSnippet,
+  fillBlank,
+  reorder;
 
   String get label => switch (this) {
         PracticeMethod.flashcard => 'Flashcard',
         PracticeMethod.multipleChoice => 'Multiple choice',
         PracticeMethod.typeAnswer => 'Type the answer',
+        PracticeMethod.codeSnippet => 'Write the code',
+        PracticeMethod.fillBlank => 'Fill in the blank',
+        PracticeMethod.reorder => 'Reorder the code',
       };
 
   String get blurb => switch (this) {
         PracticeMethod.flashcard => 'Reveal the answer and grade yourself.',
         PracticeMethod.multipleChoice => 'Pick the right answer from options.',
         PracticeMethod.typeAnswer => 'Type it; checked by match or AI.',
+        PracticeMethod.codeSnippet =>
+          'Rewrite the snippet; graded on working syntax, not an exact match.',
+        PracticeMethod.fillBlank => 'Fill the blanked-out tokens in the code.',
+        PracticeMethod.reorder => 'Drag the shuffled code lines back into order.',
       };
+
+  /// True for the coding-only drills, which quiz code-type notes.
+  bool get isCoding =>
+      this == PracticeMethod.codeSnippet ||
+      this == PracticeMethod.fillBlank ||
+      this == PracticeMethod.reorder;
 }
 
 /// Which notes a practice session draws from.
@@ -73,7 +91,16 @@ class PracticeConfig {
         all.where((i) => (i.category?.trim() ?? '') == category?.trim()),
     };
 
-    if ((method == PracticeMethod.multipleChoice ||
+    if (method.isCoding) {
+      // Coding drills only quiz code notes that can actually produce the drill.
+      pool = pool.where((i) => i.type == KnowledgeType.code).where((i) {
+        return switch (method) {
+          PracticeMethod.fillBlank => _canFillBlank(i),
+          PracticeMethod.reorder => _canReorder(i),
+          _ => i.front.trim().isNotEmpty, // codeSnippet: needs reference code
+        };
+      });
+    } else if ((method == PracticeMethod.multipleChoice ||
             method == PracticeMethod.typeAnswer) &&
         !canGenerate) {
       pool = pool.where((i) => i.hasAnswer);
@@ -82,4 +109,12 @@ class PracticeConfig {
     final queue = pool.toList()..shuffle();
     return queue;
   }
+
+  static bool _canFillBlank(KnowledgeItem i) =>
+      i.fillBlankAnswers.isNotEmpty ||
+      generateCodeDrills(i.front).fillBlankAnswers.isNotEmpty;
+
+  static bool _canReorder(KnowledgeItem i) =>
+      i.reorderSegments.length > 1 ||
+      generateCodeDrills(i.front).reorderSegments.length > 1;
 }
