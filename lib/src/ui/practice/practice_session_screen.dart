@@ -113,11 +113,15 @@ class _PracticeSessionScreenState
     if (mounted) setState(() => _preparing = false);
   }
 
-  /// Generates + caches code drills (deterministically, no LLM) for the current
-  /// note if they aren't stored yet.
+  /// Generates + caches code drills (deterministically, no LLM) from the note's
+  /// code, which lives in the answer/details field (back). Self-heals notes
+  /// whose cached drills were built from the wrong field.
   Future<void> _ensureDrills() async {
-    if (_item.hasCodeDrills) return;
-    final drills = generateCodeDrills(_item.front);
+    final drills = generateCodeDrills(_item.back ?? '');
+    final upToDate = listEquals(_item.reorderSegments, drills.reorderSegments) &&
+        listEquals(_item.fillBlankAnswers, drills.fillBlankAnswers) &&
+        _item.fillBlankTemplate == drills.fillBlankTemplate;
+    if (upToDate) return;
     final updated = _item.copyWith(
       fillBlankTemplate: drills.fillBlankTemplate,
       fillBlankAnswers: drills.fillBlankAnswers,
@@ -527,9 +531,10 @@ class _PracticeSessionScreenState
   // --- Write the code -----------------------------------------------------
   Widget _buildCodeSnippet() {
     final answered = _wasCorrect != null;
-    final task = _item.back ??
-        _item.quizQuestion ??
-        'Reproduce this code snippet from memory.';
+    // The prompt (front) describes what to write; the reference code is in back.
+    final task = _item.front.trim().isNotEmpty
+        ? _item.front
+        : 'Reproduce this code snippet from memory.';
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -572,6 +577,7 @@ class _PracticeSessionScreenState
   Future<void> _checkCode() async {
     final submitted = _answerController.text;
     if (submitted.trim().isEmpty) return;
+    final reference = _item.back ?? '';
     final llm = ref.read(llmProvider);
     setState(() => _grading = true);
     bool correct;
@@ -582,11 +588,11 @@ class _PracticeSessionScreenState
         correct = g.correct;
         feedback = g.feedback;
       } catch (_) {
-        correct = codeMatches(submitted, _item.front);
+        correct = codeMatches(submitted, reference);
         feedback = 'AI check failed; used a whitespace-insensitive match.';
       }
     } else {
-      correct = codeMatches(submitted, _item.front);
+      correct = codeMatches(submitted, reference);
       feedback = correct
           ? null
           : 'Offline check needs an equivalent match (ignoring whitespace and '
@@ -602,7 +608,7 @@ class _PracticeSessionScreenState
     if (_preparing) return const Center(child: CircularProgressIndicator());
     final answered = _wasCorrect != null;
     final answers = _item.fillBlankAnswers;
-    final template = _item.fillBlankTemplate ?? _item.front;
+    final template = _item.fillBlankTemplate ?? _item.back ?? '';
     final display = template.replaceAllMapped(
       fillBlankPlaceholderPattern,
       (m) => '[${int.parse(m.group(1)!) + 1}]',
@@ -768,7 +774,7 @@ class _PracticeSessionScreenState
       children: [
         Text('Reference', style: Theme.of(context).textTheme.labelSmall),
         const SizedBox(height: 4),
-        _codeBlock(_item.front),
+        _codeBlock(_item.back ?? ''),
       ],
     );
   }

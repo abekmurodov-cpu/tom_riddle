@@ -144,7 +144,8 @@ class GeminiProvider implements LlmProvider {
       'formatting, or equivalent constructs are fine). Fail only for wrong logic '
       'or broken syntax.\n'
       'Return JSON: {"correct": true|false, "feedback": "one short sentence"}.\n\n'
-      'Reference:\n${item.front}\n\nStudent:\n$submitted',
+      'Task: ${item.front}\n'
+      'Reference:\n${item.back}\n\nStudent:\n$submitted',
     );
     try {
       final cleaned = raw

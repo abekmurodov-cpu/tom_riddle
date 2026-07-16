@@ -49,8 +49,11 @@ class KnowledgeListNotifier extends AsyncNotifier<List<KnowledgeItem>> {
     }
     // Code notes get their fill-in-the-blank / reorder drills pre-generated
     // now (deterministically, no LLM) so those modes never cost API credits.
-    final drills = type == KnowledgeType.code
-        ? generateCodeDrills(front.trim())
+    // The code snippet lives in the answer/details field (back); the prompt
+    // (front) is the description of what it does.
+    final code = back?.trim() ?? '';
+    final drills = type == KnowledgeType.code && code.isNotEmpty
+        ? generateCodeDrills(code)
         : null;
     final item = KnowledgeItem(
       id: id,

@@ -1,8 +1,10 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
+
+/// Reminders are scheduled in this zone (Uzbekistan, UTC+5).
+const String _timeZone = 'Asia/Tashkent';
 
 /// Schedules local "time to review" reminders on Android and macOS — a safe
 /// no-op on web (the plugin has no web implementation).
@@ -29,12 +31,7 @@ class NotificationService {
   Future<void> init() async {
     if (kIsWeb) return;
     tzdata.initializeTimeZones();
-    try {
-      final name = await FlutterTimezone.getLocalTimezone();
-      tz.setLocalLocation(tz.getLocation(name));
-    } catch (_) {
-      // Fall back to UTC if the device timezone can't be resolved.
-    }
+    tz.setLocalLocation(tz.getLocation(_timeZone));
     const settings = InitializationSettings(
       android: AndroidInitializationSettings('@mipmap/ic_launcher'),
       macOS: DarwinInitializationSettings(
@@ -66,20 +63,26 @@ class NotificationService {
     return false;
   }
 
-  /// (Re)schedules a daily reminder at [hour]:[minute]. Uses inexact scheduling
-  /// so no exact-alarm permission is needed.
+  /// (Re)schedules a daily reminder at [hour]:[minute]. Prefers exact alarms so
+  /// it fires on time; if the OS denies exact-alarm permission it falls back to
+  /// inexact scheduling (which Android may delay to save battery).
   Future<void> scheduleDailyReminder(int hour, int minute) async {
     if (kIsWeb || !_ready) return;
     await cancelDailyReminder();
-    await _plugin.zonedSchedule(
-      _dailyReminderId,
-      'Knowledge',
-      'Time to review — your notes are waiting to challenge you.',
-      _nextInstanceOf(hour, minute),
-      _details,
-      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-      matchDateTimeComponents: DateTimeComponents.time,
-    );
+    Future<void> schedule(AndroidScheduleMode mode) => _plugin.zonedSchedule(
+          _dailyReminderId,
+          'Knowledge',
+          'Time to review — your notes are waiting to challenge you.',
+          _nextInstanceOf(hour, minute),
+          _details,
+          androidScheduleMode: mode,
+          matchDateTimeComponents: DateTimeComponents.time,
+        );
+    try {
+      await schedule(AndroidScheduleMode.exactAllowWhileIdle);
+    } catch (_) {
+      await schedule(AndroidScheduleMode.inexactAllowWhileIdle);
+    }
   }
 
   Future<void> cancelDailyReminder() async {

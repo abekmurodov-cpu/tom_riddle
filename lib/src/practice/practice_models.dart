@@ -92,12 +92,13 @@ class PracticeConfig {
     };
 
     if (method.isCoding) {
-      // Coding drills only quiz code notes that can actually produce the drill.
+      // Coding drills quiz code notes whose snippet (in the answer/back field)
+      // can actually produce the drill.
       pool = pool.where((i) => i.type == KnowledgeType.code).where((i) {
         return switch (method) {
           PracticeMethod.fillBlank => _canFillBlank(i),
           PracticeMethod.reorder => _canReorder(i),
-          _ => i.front.trim().isNotEmpty, // codeSnippet: needs reference code
+          _ => i.hasAnswer, // codeSnippet: needs the reference code in back
         };
       });
     } else if ((method == PracticeMethod.multipleChoice ||
@@ -111,10 +112,8 @@ class PracticeConfig {
   }
 
   static bool _canFillBlank(KnowledgeItem i) =>
-      i.fillBlankAnswers.isNotEmpty ||
-      generateCodeDrills(i.front).fillBlankAnswers.isNotEmpty;
+      generateCodeDrills(i.back ?? '').fillBlankAnswers.isNotEmpty;
 
   static bool _canReorder(KnowledgeItem i) =>
-      i.reorderSegments.length > 1 ||
-      generateCodeDrills(i.front).reorderSegments.length > 1;
+      generateCodeDrills(i.back ?? '').reorderSegments.length > 1;
 }
