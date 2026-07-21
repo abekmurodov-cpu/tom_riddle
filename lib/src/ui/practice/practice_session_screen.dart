@@ -10,9 +10,12 @@ import '../../practice/code_drills.dart';
 import '../../practice/practice_models.dart';
 import '../../providers/knowledge_providers.dart';
 import '../../scheduler/spaced_repetition.dart';
+import '../widgets/code_field.dart';
+import '../widgets/code_highlighter.dart';
+import '../widgets/flip_card.dart';
 import '../widgets/note_image.dart';
 
-const TextStyle _monoStyle = TextStyle(fontFamily: 'monospace', fontSize: 13);
+const TextStyle _monoStyle = TextStyle(fontFamily: 'monospace', fontSize: 13, height: 1.4);
 
 /// Runs a configured practice session over [queue]. Each answered card feeds the
 /// SM-2 scheduler (correct → good, wrong → again), which updates the note's
@@ -47,8 +50,10 @@ class _PracticeSessionScreenState
   List<String>? _options;
   String? _correctOption;
   String? _chosen;
-  // Type-the-answer / write-the-code state.
+  // Type-the-answer state.
   final _answerController = TextEditingController();
+  // Write-the-code editor (syntax-highlighted).
+  final _codeController = CodeEditingController();
   // Fill-in-the-blank: one controller per blank.
   final List<TextEditingController> _blankControllers = [];
   // Reorder: current arrangement as indices into the note's reorderSegments.
@@ -67,6 +72,7 @@ class _PracticeSessionScreenState
   @override
   void dispose() {
     _answerController.dispose();
+    _codeController.dispose();
     for (final c in _blankControllers) {
       c.dispose();
     }
@@ -255,6 +261,7 @@ class _PracticeSessionScreenState
       _feedback = null;
       _reorderCurrent = [];
       _answerController.clear();
+      _codeController.clear();
     });
     if (_index < _queue.length) _prepareItem();
   }
@@ -313,67 +320,89 @@ class _PracticeSessionScreenState
     );
   }
 
-  // --- Flashcard ---------------------------------------------------------
+  // --- Flashcard (Quizlet-style flip) ------------------------------------
   Widget _buildFlashcard() {
     final theme = Theme.of(context);
+    if (_preparing) return const Center(child: CircularProgressIndicator());
+    final showGrades = _revealed || !_canReveal;
     return Column(
       children: [
         Expanded(
-          child: GestureDetector(
-            onTap: _canReveal && !_revealed
-                ? () => setState(() => _revealed = true)
-                : null,
-            child: _promptCard(
-              context,
-              extra: _revealed
-                  ? Padding(
-                      padding: const EdgeInsets.only(top: 16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Divider(height: 16),
-                          Text(
-                            _revealAnswer ?? '(no answer recorded yet)',
-                            style: theme.textTheme.bodyLarge,
-                          ),
-                        ],
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 440),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    FlipCard(
+                      key: ValueKey(_index),
+                      onFlip: (back) {
+                        if (back && !_revealed) {
+                          setState(() => _revealed = true);
+                        }
+                      },
+                      front: _cardFace(
+                        _item.type.label.toUpperCase(),
+                        _item.practicePrompt,
+                        withImage: _item.hasImage,
                       ),
-                    )
-                  : null,
+                      back: _cardFace(
+                        'ANSWER',
+                        _revealAnswer ?? '(no answer recorded yet)',
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      showGrades
+                          ? 'How well did you recall it?'
+                          : 'Tap the card to flip',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-          child: _preparing
-              ? const Padding(
-                  padding: EdgeInsets.all(8),
-                  child: Center(child: CircularProgressIndicator()),
-                )
-              : _revealed || !_canReveal
-                  ? Row(
-                      children: [
-                        for (final grade in ReviewGrade.values)
-                          Expanded(
-                            child: Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 4),
-                              child: OutlinedButton(
-                                onPressed: () => _grade(grade),
-                                child: Text(grade.label),
-                              ),
-                            ),
+          child: showGrades
+              ? Row(
+                  children: [
+                    for (final grade in ReviewGrade.values)
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: OutlinedButton(
+                            onPressed: () => _grade(grade),
+                            child: Text(grade.label),
                           ),
-                      ],
-                    )
-                  : FilledButton.tonal(
-                      onPressed: () => setState(() => _revealed = true),
-                      child: const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 8),
-                        child: Text('Reveal answer'),
+                        ),
                       ),
-                    ),
+                  ],
+                )
+              : const SizedBox.shrink(),
         ),
+      ],
+    );
+  }
+
+  Widget _cardFace(String label, String text, {bool withImage = false}) {
+    final theme = Theme.of(context);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(label,
+            style: theme.textTheme.labelSmall?.copyWith(
+                letterSpacing: 1.2, color: theme.colorScheme.primary)),
+        const SizedBox(height: 14),
+        if (withImage) ...[
+          NoteImage(noteId: _item.id, maxHeight: 140),
+          const SizedBox(height: 14),
+        ],
+        Text(text, style: theme.textTheme.titleLarge, textAlign: TextAlign.center),
       ],
     );
   }
@@ -414,42 +443,53 @@ class _PracticeSessionScreenState
   // --- Type the answer ---------------------------------------------------
   Widget _buildTypeAnswer() {
     final answered = _wasCorrect != null;
+    // Scrollable middle so long AI feedback is fully reachable; action pinned.
     return Column(
       children: [
-        _promptCard(context),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: TextField(
-            controller: _answerController,
-            enabled: !answered,
-            minLines: 1,
-            maxLines: 4,
-            decoration: const InputDecoration(
-              labelText: 'Your answer',
-              border: OutlineInputBorder(),
+        Expanded(
+          child: SingleChildScrollView(
+            child: Column(
+              children: [
+                _promptCard(context),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: TextField(
+                    controller: _answerController,
+                    enabled: !answered,
+                    minLines: 1,
+                    maxLines: 4,
+                    decoration: const InputDecoration(
+                      labelText: 'Your answer',
+                      border: OutlineInputBorder(),
+                    ),
+                    onSubmitted: answered ? null : (_) => _checkTyped(),
+                  ),
+                ),
+                if (answered) _resultBanner(),
+              ],
             ),
-            onSubmitted: answered ? null : (_) => _checkTyped(),
           ),
         ),
-        const SizedBox(height: 12),
-        if (!answered)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: FilledButton(
-              onPressed: (_grading || _preparing) ? null : _checkTyped,
-              child: (_grading || _preparing)
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Text('Check'),
-            ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+          child: SizedBox(
+            width: double.infinity,
+            child: answered
+                ? FilledButton(
+                    onPressed: _advance,
+                    child: Text(_index + 1 >= _queue.length ? 'Finish' : 'Next'),
+                  )
+                : FilledButton(
+                    onPressed: (_grading || _preparing) ? null : _checkTyped,
+                    child: (_grading || _preparing)
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Text('Check'),
+                  ),
           ),
-        if (answered) ...[
-          _resultBanner(),
-          const Spacer(),
-          _nextBar(),
-        ],
+        ),
       ],
     );
   }
@@ -540,17 +580,12 @@ class _PracticeSessionScreenState
       children: [
         _codeTaskHeader('Write the code', task),
         const SizedBox(height: 12),
-        TextField(
-          controller: _answerController,
+        CodeField(
+          controller: _codeController,
           enabled: !answered,
-          minLines: 5,
-          maxLines: 16,
-          style: _monoStyle,
-          decoration: const InputDecoration(
-            labelText: 'Your code',
-            alignLabelWithHint: true,
-            border: OutlineInputBorder(),
-          ),
+          hintText: 'Write your code here…  (Tab indents)',
+          minLines: 6,
+          maxLines: 18,
         ),
         const SizedBox(height: 12),
         if (!answered)
@@ -575,7 +610,7 @@ class _PracticeSessionScreenState
   }
 
   Future<void> _checkCode() async {
-    final submitted = _answerController.text;
+    final submitted = _codeController.text;
     if (submitted.trim().isEmpty) return;
     final reference = _item.back ?? '';
     final llm = ref.read(llmProvider);
@@ -603,27 +638,54 @@ class _PracticeSessionScreenState
     await _submitObjective(correct, feedback: feedback);
   }
 
-  // --- Fill in the blank --------------------------------------------------
+  // --- Fill in the blank (inline tap-to-type) -----------------------------
   Widget _buildFillBlank() {
     if (_preparing) return const Center(child: CircularProgressIndicator());
     final answered = _wasCorrect != null;
-    final answers = _item.fillBlankAnswers;
     final template = _item.fillBlankTemplate ?? _item.back ?? '';
-    final display = template.replaceAllMapped(
-      fillBlankPlaceholderPattern,
-      (m) => '[${int.parse(m.group(1)!) + 1}]',
-    );
+    final answers = _item.fillBlankAnswers;
+    final base = _monoStyle.copyWith(color: Theme.of(context).colorScheme.onSurface);
+
+    // Interleave highlighted code with inline editable blank boxes.
+    final spans = <InlineSpan>[];
+    var cursor = 0;
+    for (final m in fillBlankPlaceholderPattern.allMatches(template)) {
+      if (m.start > cursor) {
+        spans.addAll(highlightCode(template.substring(cursor, m.start), base));
+      }
+      final k = int.parse(m.group(1)!);
+      if (k < _blankControllers.length && k < answers.length) {
+        spans.add(WidgetSpan(
+          alignment: PlaceholderAlignment.middle,
+          child: _InlineBlank(
+            controller: _blankControllers[k],
+            answer: answers[k],
+            answered: answered,
+          ),
+        ));
+      }
+      cursor = m.end;
+    }
+    if (cursor < template.length) {
+      spans.addAll(highlightCode(template.substring(cursor), base));
+    }
+
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        _codeTaskHeader('Fill in the blanks',
-            'Type the token that belongs in each numbered blank.'),
+        _codeTaskHeader(
+            'Fill in the blanks', 'Tap each blank and type the missing token.'),
         const SizedBox(height: 12),
-        _codeBlock(display),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Text.rich(TextSpan(children: spans)),
+        ),
         const SizedBox(height: 16),
-        for (var i = 0; i < answers.length; i++)
-          _blankField(i, answers[i], answered),
-        const SizedBox(height: 8),
         if (!answered)
           FilledButton(onPressed: _checkBlanks, child: const Text('Check'))
         else ...[
@@ -632,30 +694,6 @@ class _PracticeSessionScreenState
           _nextBar(),
         ],
       ],
-    );
-  }
-
-  Widget _blankField(int i, String answer, bool answered) {
-    final correct = _blankControllers[i].text.trim() == answer.trim();
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: TextField(
-        controller: _blankControllers[i],
-        enabled: !answered,
-        style: _monoStyle,
-        decoration: InputDecoration(
-          isDense: true,
-          prefixText: '${i + 1}.  ',
-          border: const OutlineInputBorder(),
-          suffixIcon: answered
-              ? Icon(correct ? Icons.check : Icons.close,
-                  color: correct
-                      ? const Color(0xFF2E9E4F)
-                      : const Color(0xFFD64545))
-              : null,
-          helperText: answered && !correct ? 'Answer: $answer' : null,
-        ),
-      ),
     );
   }
 
@@ -686,30 +724,50 @@ class _PracticeSessionScreenState
           child: ReorderableListView.builder(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             itemCount: _reorderCurrent.length,
-            buildDefaultDragHandles: !answered,
+            // No trailing handles — the whole block is the drag target, grabbed
+            // immediately on press (snappy on touch, click-drag on desktop).
+            buildDefaultDragHandles: false,
             onReorderItem: _onReorder,
             itemBuilder: (context, i) {
+              final scheme = Theme.of(context).colorScheme;
               final idx = _reorderCurrent[i];
-              final correctHere = idx == i;
+              final base = _monoStyle.copyWith(color: scheme.onSurface);
               final border = !answered
-                  ? null
-                  : (correctHere
+                  ? scheme.outlineVariant
+                  : (idx == i
                       ? const Color(0xFF2E9E4F)
                       : const Color(0xFFD64545));
-              return Card(
-                key: ValueKey(idx),
+              final card = Card(
                 margin: const EdgeInsets.symmetric(vertical: 4),
+                elevation: 0,
+                color: scheme.surfaceContainerHighest,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
-                  side: border == null
-                      ? BorderSide.none
-                      : BorderSide(color: border, width: 2),
+                  side: BorderSide(
+                      color: border, width: answered && idx != i ? 2 : 1),
                 ),
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 12, 40, 12),
-                  child: Text(segments[idx], style: _monoStyle),
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      if (!answered)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 10),
+                          child: Icon(Icons.drag_indicator,
+                              size: 18, color: scheme.outline),
+                        ),
+                      Expanded(
+                        child: Text.rich(
+                            TextSpan(children: highlightCode(segments[idx], base))),
+                      ),
+                    ],
+                  ),
                 ),
               );
+              return answered
+                  ? KeyedSubtree(key: ValueKey(idx), child: card)
+                  : ReorderableDragStartListener(
+                      key: ValueKey(idx), index: i, child: card);
             },
           ),
         ),
@@ -757,6 +815,8 @@ class _PracticeSessionScreenState
   }
 
   Widget _codeBlock(String code) {
+    final base = _monoStyle.copyWith(
+        color: Theme.of(context).colorScheme.onSurface);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
@@ -764,7 +824,10 @@ class _PracticeSessionScreenState
         color: Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(10),
       ),
-      child: Text(code, style: _monoStyle),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Text.rich(TextSpan(children: highlightCode(code, base))),
+      ),
     );
   }
 
@@ -795,6 +858,67 @@ class _PracticeSessionScreenState
             child: const Text('Back'),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// An inline, tap-to-type blank rendered inside the fill-in-the-blank code.
+/// After checking, it reveals the correct token colored by whether the user
+/// matched it.
+class _InlineBlank extends StatelessWidget {
+  const _InlineBlank({
+    required this.controller,
+    required this.answer,
+    required this.answered,
+  });
+
+  final TextEditingController controller;
+  final String answer;
+  final bool answered;
+
+  static const _mono = TextStyle(fontFamily: 'monospace', fontSize: 13);
+
+  @override
+  Widget build(BuildContext context) {
+    if (answered) {
+      final correct = controller.text.trim() == answer.trim();
+      final color =
+          correct ? const Color(0xFF2E9E4F) : const Color(0xFFD64545);
+      return Container(
+        margin: const EdgeInsets.symmetric(horizontal: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: color),
+        ),
+        child: Text(answer,
+            style: _mono.copyWith(color: color, fontWeight: FontWeight.w600)),
+      );
+    }
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 2),
+      constraints: const BoxConstraints(minWidth: 48, maxWidth: 160),
+      child: IntrinsicWidth(
+        child: TextField(
+          controller: controller,
+          style: _mono,
+          textAlign: TextAlign.center,
+          autocorrect: false,
+          enableSuggestions: false,
+          decoration: InputDecoration(
+            isDense: true,
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+            filled: true,
+            fillColor: Theme.of(context)
+                .colorScheme
+                .primaryContainer
+                .withValues(alpha: 0.4),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)),
+          ),
+        ),
       ),
     );
   }
